@@ -1,0 +1,5 @@
+# Copy this to terraform.tfvars and fill in your values.
+# terraform.tfvars is gitignored 
+
+location    = "uksouth"
+alert_email = "your-email@example.com"

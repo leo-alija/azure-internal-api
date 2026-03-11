@@ -97,7 +97,7 @@ resource "azurerm_key_vault_secret" "ca_cert" {
   content_type = "application/x-pem-file"
   tags         = var.tags
 
-  depends_on = [azurerm_role_assignment.deployer_kv_admin]
+  depends_on = [azurerm_role_assignment.kv_admin]
 }
 
 resource "azurerm_key_vault_secret" "client_cert" {
@@ -107,7 +107,7 @@ resource "azurerm_key_vault_secret" "client_cert" {
   content_type = "application/x-pem-file"
   tags         = var.tags
 
-  depends_on = [azurerm_role_assignment.deployer_kv_admin]
+  depends_on = [azurerm_role_assignment.kv_admin]
 }
 
 resource "azurerm_key_vault_secret" "client_key" {
@@ -117,5 +117,5 @@ resource "azurerm_key_vault_secret" "client_key" {
   content_type = "application/x-pem-file"
   tags         = var.tags
 
-  depends_on = [azurerm_role_assignment.deployer_kv_admin]
+  depends_on = [azurerm_role_assignment.kv_admin]
 }

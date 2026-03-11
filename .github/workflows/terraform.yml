@@ -1,0 +1,65 @@
+name: "Terraform CI"
+
+# Run on PRs and pushes to main
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+# OIDC requests a token from Azure AD without storing client secrets in GitHub
+permissions:
+  id-token: write
+  contents: read
+  pull-requests: write
+
+env:
+  ARM_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+  ARM_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+  ARM_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+  ARM_USE_OIDC: true
+  WORKING_DIR: environments/dev
+
+jobs:
+  terraform:
+    name: "Terraform Plan"
+    runs-on: ubuntu-latest
+
+    steps:
+      # 1. Checkout code
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # 2. Setup Terraform
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "1.5.0"
+
+      # 3. Authenticate to Azure via OIDC
+      - name: Azure Login (OIDC)
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      # 4. Format check
+      - name: Terraform Format
+        run: terraform fmt -check -recursive
+        working-directory: ${{ env.WORKING_DIR }}
+
+      # 5. Initialises Terraform, downloads providers and modules
+      - name: Terraform Init
+        run: terraform init
+        working-directory: ${{ env.WORKING_DIR }}
+
+      # 6. Validates syntax
+      - name: Terraform Validate
+        run: terraform validate
+        working-directory: ${{ env.WORKING_DIR }}
+
+      # 7. Plan
+      - name: Terraform Plan
+        run: terraform plan -var="alert_email=ci@example.com" -no-color
+        working-directory: ${{ env.WORKING_DIR }}

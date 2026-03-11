@@ -138,3 +138,131 @@ The pipeline uses OpenID Connect (OIDC) instead of storing Azure credentials as 
 - GitHub requests a short-lived token from Azure AD for each run
 - The token expires after the job finishes
 
+
+**To configure OIDC:**
+
+1. **Create an App Registration in Azure AD:**
+   ```bash
+   az ad app create --display-name "github-actions-terraform"
+   ```
+   Or Manually via Portal
+
+2. **Create a Service Principal:**
+   ```bash
+   az ad sp create --id <app-id>
+   ```
+   Or Manually via Portal
+
+3. **Add a Federated Credential** (links GitHub to Azure AD):
+   ```bash
+   az ad app federated-credential create --id <app-id> --parameters '{
+     "name": "github-main",
+     "issuer": "https://token.actions.githubusercontent.com",
+     "subject": "repo:<your-org>/<your-repo>:ref:refs/heads/main",
+     "audiences": ["api://AzureADTokenExchange"]
+   }'
+   ```
+4. **Grant the SP permissions on your subscription:**
+   ```bash
+   az role assignment create \
+     --assignee <app-id> \
+     --role "Contributor" \
+     --scope /subscriptions/<subscription-id>
+
+   az role assignment create \
+     --assignee <app-id> \
+     --role "User Access Administrator" \
+     --scope /subscriptions/<subscription-id>
+   ```
+
+5. **Add three secrets in GitHub** (Settings → Secrets → Actions):
+   - `AZURE_CLIENT_ID` - the App Registration's Application (client) ID
+   - `AZURE_TENANT_ID` - your Azure AD tenant ID
+   - `AZURE_SUBSCRIPTION_ID` - your Azure subscription ID
+
+> **Note:** No client secret is stored anywhere. The `User Access Administrator` role is needed because we create RBAC assignments (Function MI → Key Vault).
+
+## Setup Instructions
+
+### Prerequisites
+
+- Terraform >= 1.5.0
+- Azure CLI (`az login`)
+- An Azure subscription with Contributor + User Access Administrator
+- Python 3.11 (for local function testing)
+
+### Deploy
+
+```bash
+cd environments/dev
+cp terraform.tfvars.example terraform.tfvars # edit with own values
+terraform init
+terraform plan
+terraform apply
+```
+
+### Deploy the Function Code
+
+```bash
+cd src/function_app
+func azure functionapp publish <function-app-name> --python
+```
+
+### Testing mTLS
+
+```bash
+# From a VM or resource INSIDE the VNet:
+curl -X POST https://<function-hostname>/api/message \
+  --cert client.pem \
+  --key client-key.pem \
+  -H "Content-Type: application/json" \
+  -d '{"message": "hello from internal service"}'
+
+# Expected:
+# {"message": "hello from internal service", "timestamp": "...", "requestId": "..."}
+
+# Without a client cert - rejected at the TLS layer, never reaches our code
+```
+
+> **Note:** Since public access is disabled on the Function App, testing requires a resource inside the VNet (e.g. an Azure VM or Bastion). You can verify the deployment is correct using Azure CLI without needing VNet access - see Teardown section.
+
+## Teardown
+
+```bash
+cd environments/dev
+terraform destroy
+```
+Key Vault soft-delete may require  
+```bash
+az keyvault purge --name kv-internalapidev01
+```
+
+## Cost Estimate
+
+All costs are covered by the Azure free trial $200/£150 credit. At ~£9-10/month, this uses less than 7% of the free credit even if left running for the full 30 days.
+
+| Resource | Estimated Monthly Cost (dev) |
+|---|---|
+| Function App (Consumption Y1) | ~£0 (first 1M executions free) |
+| Storage Account (LRS) | ~£0.01-0.02 |
+| Key Vault (standard) | ~£0.02 per 10K operations |
+| Log Analytics (30 day retention) | Free (first 5GB/month included) |
+| Application Insights | Free (uses Log Analytics ingestion) |
+| Private Endpoints (6x) | ~£6 (£1/month each) |
+| Private DNS Zones (6x) | ~£3 (£0.50/month each) |
+| **Total** | **~£9-10/month** |
+
+## AI Usage & Critique
+
+| Step | What I used AI for | What it suggested | What I changed and why |
+
+| Private DNS zones | Private endpoint DNS setup | Only included blob for storage - missed queue, table, and file | Added all four - the Function runtime needs all of them |
+| Key Vault | Key Vault setup with certs | Suggested access policies instead of RBAC mode | Changed to RBAC as its more granular, works properly with managed identities |
+| Observability | Log Analytics + App Insights + alert | Put the alert rule in the observability module, creating a circular dependency | Moved the alert rule to the environment config to break the circular dependency |
+| Observability | App Insights instrumentation key | Included it as a primary output | Marked it as legacy - Microsoft recommends using the connection string instead |
+| CI/CD | GitHub Actions workflow | Generated a base template for Terraform CI and suggested storing Azure credentials as GitHub secrets | Edited the template to use OIDC instead — no long-lived secrets, short-lived tokens per run, more secure. Added format check and validate steps |
+
+### Patterns I Corrected
+- **Circular dependency:** AI put the alert rule (which targets the Function App) in the observability module, but the Function App needs App Insights from observability. Moved the alert rule to the environment config.
+- **Storage PE oversimplification:** Treated storage access as a single blob PE. Function Apps need blob, queue, table, and file — each requires its own PE and DNS zone.
+- **Default to access policies:** Key Vault access policies are legacy. RBAC is the modern approach.

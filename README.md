@@ -253,7 +253,7 @@ All costs are covered by the Azure free trial $200/£150 credit. At ~£9-10/mont
 | **Total** | **~£9-10/month** |
 
 ## AI Usage & Critique
-
+|---|---|---|---|
 | Step | What I used AI for | What it suggested | What I changed and why |
 
 | Private DNS zones | Private endpoint DNS setup | Only included blob for storage - missed queue, table, and file | Added all four - the Function runtime needs all of them |
